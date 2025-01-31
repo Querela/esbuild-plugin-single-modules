@@ -1,0 +1,6 @@
+# dependencies
+node_modules/
+# build
+dist/
+# pack
+esbuild-plugin-single-modules-*.tgz
