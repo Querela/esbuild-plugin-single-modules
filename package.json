@@ -1,20 +1,28 @@
 {
   "name": "esbuild-plugin-single-modules",
-  "version": "1.0.0",
   "description": "esbuild plugin to split bundles into modules for each import",
+  "version": "1.0.0",
+  "license": "MIT",
+  "keywords": [
+    "esbuild",
+    "plugin",
+    "modules"
+  ],
+  "author": "Querela <ekdev@live.de>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Querela/esbuild-plugin-single-modules.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Querela/esbuild-plugin-single-modules/issues"
+  },
+  "homepage": "https://github.com/Querela/esbuild-plugin-single-modules",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [
-    "esbuild",
-    "plugin",
-    "modules"
-  ],
-  "author": "Querela",
-  "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.12.0",
     "typescript": "^5.7.3"
