@@ -1,11 +1,29 @@
 import * as esbuild from "esbuild";
+import fs from "node:fs";
 import { dirname, sep as dirsep, join, parse, relative } from "node:path";
 
 export interface singleModulesPluginOptions {
-  /** filter regex for esbuild.Plugin.onResolve() method */
+  /**
+   * Filter regex for `esbuild.Plugin.onResolve()` method.
+   * @default `.*` (match all)
+   */
   filter: RegExp;
-  /** number of path segments to drop from input/source files, for "./src/<file>" use 1 */
+  /**
+   * Number of path segments to drop from input/source files.
+   *
+   * E.g., for "./src/<file>" use 1 to get "./<file>"
+   * @default undefined
+   */
   numLevelsInputPathToDrop?: number;
+  /**
+   * Transform extensions of import/export statements, might be required for "out-extension" config.
+   *
+   * will run on all files filtered by `filter` parameter, so for any JS/TS if not restricted
+   *
+   * NOTE: currently only intended for changes from ".js", to e.g. ".mjs"
+   * @default false
+   */
+  transformImportExtensions: boolean;
 }
 
 /**
@@ -37,11 +55,16 @@ function reducePathLeft(path: string, numSegments: number = 0) {
   }
 }
 
+const IMPORT_PATTERN = /(?:import|from) ("|')((?:\.+\/)+.+(\.js))(?:\1);?/g;
+
 export function singleModulesPlugin({
   filter = /.*/,
   numLevelsInputPathToDrop,
+  transformImportExtensions = false,
 }: singleModulesPluginOptions): esbuild.Plugin {
+  // lookup to skip already processed files
   const seenFiles = new Set();
+  // root directory for file path rewriting
   let root: string | undefined = undefined;
 
   return {
@@ -69,7 +92,10 @@ export function singleModulesPlugin({
         build.initialOptions.entryPoints = [{ in: input, out: output }];
       }
 
+      // recursive builds (input/output params)
       const filespecs: { in: string; out: string }[] = [];
+      // lookup to original file name if we transform imports
+      const rewrittenImports = new Map<string, string>();
 
       build.onResolve({ filter: filter }, async (args) => {
         // do nothing for "entry-point"
@@ -82,13 +108,24 @@ export function singleModulesPlugin({
         }
 
         // check for supported processing
-        if (args.kind !== "import-statement") {
+        if (
+          args.kind !== "import-statement" &&
+          args.kind !== "dynamic-import"
+        ) {
           throw new Error(
-            `Unknown import path type: "${args.kind}", expected "import-statement"`
+            `Unknown import path type: "${args.kind}", expected "import-statement" or "dynamic-import"`
           );
         }
 
-        // this should now only be for "import-statement"
+        // if we enable import transformations, then we need to revert this in the lookup ...
+        if (transformImportExtensions) {
+          const origPath = rewrittenImports.get(
+            `${args.importer}|${args.path}`
+          );
+          if (origPath !== undefined) args.path = origPath;
+        }
+
+        // this should now only be for "import-statement" or "dynamic-import"
         const file = join(args.resolveDir, args.path);
 
         // only process (build) file once, then skip
@@ -108,12 +145,6 @@ export function singleModulesPlugin({
           const input = "./" + relInput;
           const output = join(relInputDir, parse(input).name);
 
-          // console.log(
-          //   "import",
-          //   { path: args.path, resolveDir: args.resolveDir },
-          //   { file, relInput, relInputDir, input, output }
-          // );
-
           // store input/output for batched processing
           filespecs.push({ in: input, out: output });
         }
@@ -122,8 +153,8 @@ export function singleModulesPlugin({
         return { external: true };
       });
 
+      // start next builds
       build.onEnd(async (_result) => {
-        // console.debug("[onEnd]", filespecs);
         if (filespecs.length > 0) {
           // run build on all the collected files
           await esbuild.build({
@@ -132,6 +163,47 @@ export function singleModulesPlugin({
           });
         }
       });
+
+      // NOTE: for now, only support ".js" extension rewrites
+      if (
+        transformImportExtensions &&
+        options.outExtension &&
+        Object.getOwnPropertyNames(options.outExtension).includes(".js") &&
+        options.outExtension[".js"] !== ".js"
+      ) {
+        const destExt = options.outExtension[".js"];
+
+        build.onLoad({ filter: filter }, async (args) => {
+          // inspired by
+          // - https://github.com/gjsify/gjsify/blob/main/packages/infra/esbuild-plugin-transform-ext/src/plugin.ts
+          // - https://esbuild.github.io/plugins/#on-load
+
+          // load file contents
+          let contents = await fs.promises.readFile(args.path, "utf8");
+
+          // find all import statments with local imports: "../" or "./"
+          const matches = Array.from(contents.matchAll(IMPORT_PATTERN));
+          for (const match of matches) {
+            const importFile = match[2]; // import source (filename)
+            const newImportFile = importFile.replace(/\.js$/, destExt);
+            rewrittenImports.set(`${args.path}|${newImportFile}`, importFile); // objects compare with id not value
+
+            const importStr = match[0]; // whole import fragment
+            // const transformed = importStr.replace(/\.js("|')(;?)$/, destExt + "$1$2"); // once should be enough?
+            const newImportStr = importStr.replace(importFile, newImportFile); // once should be enough?
+            contents = contents.replace(importStr, newImportStr);
+          }
+
+          return {
+            contents: contents,
+            loader: [".ts", ".mts", ".cts", ".tsx"].includes(
+              parse(args.path).ext
+            )
+              ? "ts"
+              : "js",
+          };
+        });
+      }
     },
   };
 }

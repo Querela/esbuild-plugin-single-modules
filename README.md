@@ -27,3 +27,16 @@ await esbuild.build({
   plugins: [singleModulesPlugin({ numLevelsInputPathToDrop: 1 })],
 });
 ```
+
+It is also possible to module file extensions, e.g. `.js` to `.mjs`.
+
+```js
+await esbuild.build({
+  // other parameters same ...
+
+  // to map ".js" to ".mjs"
+  outExtension: { '.js': '.mjs' },
+  // explicitely allow content transformation of imports with "transformImportExtensions: true"
+  plugins: [singleModulesPlugin({ /* ... */ transformImportExtensions: true })],
+});
+```
